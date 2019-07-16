@@ -1,0 +1,14 @@
+# Data from a IM767(guttatus)xSF(nasutus) f2 intercross
+crosstype: f2
+geno: LOD14.rqtl.F2s.geno
+pheno: StigClos.pheno
+gmap: LOD14.rqtl.lepmap.gmap
+alleles:
+- G
+- S
+genotypes:
+ GG: 1
+ GS: 2
+ SS: 3
+na.strings:
+- '-'

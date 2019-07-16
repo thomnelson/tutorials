@@ -1,0 +1,183 @@
+---
+title: "R/qtl tutorial"
+author: "Thom Nelson"
+date: "2/20/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+# install.packages("qtl2", repos="http://rqtl.org/qtl2cran")
+library(qtl2)
+
+```
+
+# R/qtl2
+
+R/qtl2 can be installed directly from a CRAN-like repository that Karl Broman has set up. 
+
+Reading cross data into R works through a 'control file', which is a YAML document  -- [Yet Another Markup Language](https://yaml.org/) -- containing some core info:
+
+* files containing cross info
+    + cross genotypes
+    + cross phenotypes
+    + phenotypic covariates (e.g. time of measurement)
+    + genetic map
+* Genotype designations in the genotype file
+* Definitions of offspring sex
+* Definition of cross design (e.g. f2)
+
+# Input data formats
+All tabular inputs are comma-separated files.
+### genotypes
+Genotype definitions are flexible. You just need to define them in the YAML control file. For the input example, I'll use reference allele dosage -- 0, 1, 2 -- as this is a common way to represent genotypes. Missing genotypes will be defined as '-'. The format of the genotype file (omitting whitespace) is:
+``` {r genoexample, eval=F}
+id   , marker_1, marker_2, ... marker_k
+indv1, 0       , 0       , ...        1
+indv2, 1       , 1       , ...        2
+...
+indvN, 2       , -       , ...        1
+```
+### genetic map
+``` {r mapexample, eval=F}
+marker, chr, pos
+m1    ,   1, 1.3
+m2    ,   1, 3.4
+m3    ,   1, 3.5
+m4    ,   1, 6.0
+...
+mN    ,   C, XcM
+```
+### phenotypes
+``` {r phenoexample, eval=F}
+
+id    , pheno1, pheno2, ... phenoK  
+indv1 ,   32.0,      N, ...      X
+indv2 ,   14.6,      Y, ...      X
+...
+indvN ,    6.5,      N, ...      X
+
+```
+
+# Sample data and R objects
+
+This document uses an F2-intercross "stigclos", performed my Mariah McIntosh and Lila Fishman. The workflow and datasets are similar to those found in the [Rqtl2 tutorial](http://kbroman.org/qtl2/assets/vignettes/input_files.html).
+
+You can first either set the working directory to the directory containing all files from my [GitHub repo]():
+
+``` {r load_test_data1, echo=T, message=F,error=F,warning=F}
+setwd("/Users/thom/GitHub/tutorials/rqtl2/")
+stigclos <- read_cross2("StigClos.yaml")
+```
+
+or simply point to the absolute path of that yaml file, e.g.:
+``` {r load_test_data2, echo=T, eval=F,message=F,error=F,warning=F}
+stigclos <- read_cross2("/Users/thom/GitHub/tutorials/rqtl2/StigClos.yaml")
+
+```
+
+``` {r countmarkers, include=F}
+nmarkers <- 0
+for (i in 1:length(stigclos$gmap)) {
+    nmarkers <- nmarkers + length(stigclos$gmap[[i]])
+}
+
+```
+
+
+The cross consists of `r dim(stigclos$cross_info)[1]` `r stigclos$crosstype` offspring genotyped at `r nmarkers` markers on `r length(stigclos$gmap)` linkage groups.
+
+## The genetic map: genotypes & pseudomarkers
+
+### calculate genotype probabilities
+
+The genetic map is organized in the r/qtl2 object `stigclos` as a list of linkage groups. Access the entire map using `stigclos$gmap` or a specific linkage groups by `stigclos$gmap$lgname`. The linkage group name needs to be in back-quotes. For instance:
+``` {r gmap_access}
+head(stigclos$gmap$`1`)
+```
+Then, insert pseudo-markers into the dataset. The `insert_pseudomarkers` function creates an object with the same structure as `stigclos$gmap` but contains a number of evenly spaced markers across the linkage group.
+``` {r pseudos}
+map <- insert_pseudomarkers(stigclos$gmap, step=1)
+head(map$`1`)
+```
+Next, calculate genotype probabilities at each pseudomarker. If working with a big-ass cross, you can specify the number of cores to use. Setting 'cores=0' will tell R/qtl2 to detect and use available cores via parallel::detectCores(). 
+``` {r genoProbs}
+pr <- calc_genoprob(stigclos, map, error_prob=0.002, cores = 2)
+```
+
+### kinship
+You can use the genotype probabilities to construct a kinship matrix if you want to use a linear mixed model with a random polygenic effect:
+
+``` {r kinship_create}
+kinship <- calc_kinship(pr)
+```
+
+This creates a square matrix of kinship values for each pair of F2s. It's easy to see that these are full sibs.
+``` {r kinship_hist, echo=F, fig.width=4, fig.height=3, fig.align='center'}
+hist(kinship, xlim = c(0,1), breaks = seq(0,1,by=0.01), main="")
+```
+
+You may also wish to use the 'leave one chromosome out' (LOCO) method when conducting a genome scan. This method calculates kinship based on all but the focal chromosome. It can, therefore, be used in genome scans to compute QTL probabilities on a given chromosome conditional on kinship calculated on all the remaining chromsomes. As with calculating genotype probabilities, you may use multiple cores.
+
+``` {r kinshiploco}
+kinship_loco <- calc_kinship(pr, "loco")
+```
+
+# Genome scans!
+
+Perform a genome scan with Haley-Knott regression ([Haley & Knott 1992](https://www.ncbi.nlm.nih.gov/pubmed/16718932)) using the function `scan1()`. In the following genome scans, 'CW' stands for corolla width, which in this mapping population is a positive control with one major QTL and a few minor QTL.
+
+``` {r plotscan1, fig.width=8, fig.height=8,fig.align='center'}
+
+scanout <- scan1(pr, stigclos$pheno, kinship = kinship_loco)
+
+ymx <- maxlod(scanout) # overall maximum LOD score
+phenocol <- 1
+layout(matrix(1:4,2,1,byrow=T))
+plot(scanout, map, lodcolumn=2, col="slateblue", ylim=c(0, ymx*1.02))
+plot(scanout, map, lodcolumn=1, col="violetred", ylim=c(0, ymx*1.02),add=TRUE)
+legend("topleft", lwd=2, col=c("slateblue","violetred"), 
+       colnames(scanout)[2:1], bg="gray90")
+plot(scanout, map, lodcolumn=3, col="green4", ylim=c(0, ymx*1.02))
+plot(scanout, map, lodcolumn=4, col="goldenrod3", ylim=c(0, ymx*1.02),add=TRUE)
+legend("topleft", lwd=2, col=c("green4","goldenrod3"), 
+       colnames(scanout)[3:4], bg="gray90")
+
+```
+
+``` {r qtl_permutations, eval=F, include=F}
+
+permout <- scan1perm(pr, stigclos$pheno, kinship = kinship_loco, n_perm=1000,cores=2)
+
+
+```
+
+
+``` {r physgenet, fig.width=8, fig.height=18, fig.align='center',eval=F,include=F}
+
+mapfile <- "/Users/thom/Dropbox/2.Fishman_Lab/Data/guttatus/stigmaClosure/F2_IM767xSF/lepmap/LOD14_lgs_withScaffolds_GATKv2.txt"
+mapdata <- read.table(mapfile, header=T, stringsAsFactors = F)
+mapdata$Mb <- mapdata$bp / 1000000
+LGs <- 1:14
+scafs <- paste0("scaffold_",LGs)
+mapdata <- mapdata[mapdata$scaffold %in% scafs,]
+
+### plot out LGs. X-axis will be guttatus assembled scaffolds,
+###   y axis is cM position for each marker. Each panel will be
+###   one of 15 LGs currently groups at LOD14
+
+xmax <- max(mapdata$Mb, na.rm=T)
+ymax <- max(mapdata$cM, na.rm=T)
+cols <- c(rgb(0,0,0,0.2), adjustcolor("firebrick3",alpha=0.2))
+layout(matrix(c(1:14), 7,2,byrow=T))
+for (lg in LGs) {
+    lgdata <- mapdata[mapdata$LG == lg,]
+    scafs <- unique(lgdata$scaffold)
+    plot(lgdata$Mb, lgdata$cM, xlim=c(0,xmax),ylim=c(0,ymax),
+         xlab="Scaffold position, Mb", ylab="cM",
+         pch=20, col = ifelse(lgdata$scaffold==scafs[1],cols[1],cols[2]),
+         main=paste0("LG ",lg))
+   legend(x="topright", legend=scafs,pch=20,col=cols[1:length(scafs)])
+}
+
+```
