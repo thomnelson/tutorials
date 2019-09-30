@@ -1,0 +1,134 @@
+---
+title: "F2AncestryAnalysis"
+author: "Thom Nelson"
+date: "9/27/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+# setwd("/Users/thom/Dropbox/3.Workshops/lepmap/")
+###---- IMPORT DATA
+### GENETIC MAP
+gmap <- "datafiles/SFxIM767_withphysical.gmap"
+gmap <- read.table(gmap,
+                   header=T,
+                   sep=",",
+                   stringsAsFactors = F)
+gmap$marker <- paste0("X",gmap$marker)
+### MARKER GENOTYPES
+geno <- "datafiles/SFxIM767_SFinv.geno"
+geno <- read.table(geno, 
+                   header=T,
+                   row.names=1, 
+                   sep=",",
+                   stringsAsFactors = F
+                   )
+### CONVERT GENOTYPES TO 0,1,2
+geno[geno == "SS"] <- "0"
+geno[geno == "GS"] <- "1"
+geno[geno == "GG"] <- "2"
+n.indiv <- dim(geno)[1]
+### CONVERT DATA TYPE TO NUMERIC AND TRANSPOSE
+genoMat <- apply(X=geno,MARGIN=1,FUN=as.numeric)
+
+### ID number of alleles present per individual and per marker
+###   (matrix dimensions * 2)
+n.alleles.PerInd <- dim(genoMat)[1] * 2
+n.alleles.PerMarker <- dim(genoMat)[2] * 2
+
+###---- ANY FUNCTIONS WE MIGHT WANT
+###
+### function for computing observed heterozygosity for genotypes
+###    valued by dosage of one allele (i.e. 0,1,2)
+hetO <- function (x) {
+    return(length(x[x == 1]) / length(x))
+}
+
+
+```
+
+# Ancestry
+
+```{r AncestryCalc}
+
+### CALCULATE GUTTATUS ANCESTRY PER INDIVIDUAL (FOR ANCESTRY PROPORTIONS)
+###    AND PER MARKER (FOR SEGREGATION DISTORTION)
+guttAncPerInd <- apply(X=genoMat, MARGIN=2, FUN=sum)
+guttAncPerInd <- guttAncPerInd / n.alleles.PerInd
+
+guttAncPerMarker <- apply(X=genoMat, MARGIN=1, FUN=sum)
+
+### CALCULATE OBSERVED AND EXPECTED HETEROZYGOSITY AT EACH MARKER
+###   OBSERVED = NUMBER OF GUTTATUS ALLELES / NUMBER OF ALLELES
+###   EXPECTED = 2*(p)*(1-p)
+hetObsPerMarker  <- apply(X=genoMat,MARGIN=1,hetO)
+hetExpPerMarker  <- 2 * (guttAncPerMarker/n.alleles.PerMarker) * 
+                        (1 - guttAncPerMarker/n.alleles.PerMarker)
+
+```
+
+## Genome-wide: per individual and per marker
+
+``` {r AncestryHist, fig.width=6,fig.height=3,fig.align='center', echo=F}
+### PLOT GUTTATUS ANCESTRY PER PROGENY AND PER MARKER
+
+layout(matrix(1:2,1,2,byrow=T))
+hist(guttAncPerInd, breaks=seq(0,1,by=0.025),main="",xaxt='n',
+     xlab="guttatus ancestry per F2")
+    axis(1,at=seq(0,1,by=0.25))
+hist(guttAncPerMarker/n.alleles.PerMarker, breaks=seq(0,1,by=0.025),main="",xaxt='n',
+     xlab = "guttatus ancestry per marker")
+    axis(1,at=seq(0,1,by=0.25))
+
+```
+
+``` {r blank, include=F,echo=F}
+```
+### Notes
+# Segregation distortion
+## on the genetic map
+
+``` {r SegregationPlotBycM, fig.width=6,fig.height=16,fig.align='center'}
+
+layout(matrix(1:14,7,2,byrow=T))
+
+for (LG in 1:14) {
+    hetO.LG <- hetObsPerMarker[gmap$LG == LG]
+    cM.LG   <- gmap$cM[gmap$LG == LG]
+    plot(cM.LG, hetO.LG,type="n",ylim=c(0,1),yaxt='n',xlim = c(0,max(gmap$cM)),
+         xlab = "cM",ylab="Obs[heterozygosity]")
+        abline(h=0.5,lty="dashed")
+        points(cM.LG, hetO.LG,pch=20)
+        axis(2, at=seq(0,1,by=0.1),las=1)
+        legend(x="topleft",legend=paste0("LG ",LG),bty="n")
+}
+
+```
+
+### Notes
+
+## distortion on the physical map
+
+
+``` {r SegregationPlotByPhys, fig.width=6,fig.height=16,fig.align='center'}
+
+layout(matrix(1:14,7,2,byrow=T))
+
+for (LG in 1:14) {
+    lgname  <- paste0("scaffold_",LG)
+    hetO.LG <- hetObsPerMarker[gmap$chr == lgname]
+    Mbp.LG   <- gmap$bp[gmap$chr == lgname] / 1000000
+    plot(Mbp.LG, hetO.LG,type="n",ylim=c(0,1),yaxt='n',
+         xlab = "position, Mbp",ylab="Obs[heterozygosity]")
+        abline(h=0.5,lty="dashed")
+        points(Mbp.LG, hetO.LG,pch=20)
+        axis(2, at=seq(0,1,by=0.1),las=1)
+        legend(x="topleft",legend=paste0("scaffold_",LG),bty="n")
+}
+
+```
+
+### Notes
+
+
